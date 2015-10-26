@@ -1,0 +1,4 @@
+node_modules/**
+source/javascripts/vendor/**
+webpack.config.js
+.tmp/**

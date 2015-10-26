@@ -1,0 +1,16 @@
+dependencies:
+  override:
+    - bundle install
+    - npm install
+test:
+  override:
+    - bundle exec scss-lint
+    - ./node_modules/eslint/bin/eslint.js source/javascripts/
+    - bundle exec middleman build
+
+## Customize deployment commands
+deployment:
+  staging:
+    branch: /.*/
+    commands:
+      - make -ef Circlefile deploy

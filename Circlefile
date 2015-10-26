@@ -1,0 +1,147 @@
+# ABOUT THIS FILE
+#
+# In conjunction with a properly configured Circle CI build, this file
+# will deploy a static build from Circle to a remote host of your
+# choosing for every branch that is pushed to Github.
+#
+# To use it, add the following command to your circle.yml file:
+#
+# make -ef Circlefile deploy
+#
+# Note that this file is actually a *Makefile* masquerading as a
+# "Circlefile". That's why to run these tasks you'll need to pass the
+# '-f' flag and identify this file explicitly.
+#
+# By default, variables defined within a Makefile override environment
+# variable values. This file is designed with the opposite principle in
+# mind -- i.e. that the sane defaults are set explicitly here, any of
+# which can be overridden via environment variables.
+#
+# To ensure this behavior, make sure to run this file with the `-e`
+# flag.
+
+
+# REQUIRED ENVIRONMENT VARIABLES
+#
+# The following environment variables must be defined in order for the
+# make tasks in this file to execute properly. Most of these are
+# already defined by Circle CI during each build.
+#
+# CIRCLEFILE_GITHUB_ACCESS_TOKEN
+# An access token for this projects repository that has permission
+# to get/post to the Github Status API. Set this value in the Circle
+# CI admin under Project Settings > Tweaks > Environment Variables
+#
+# CIRCLE_PROJECT_USERNAME
+# The username or organization name of the project being tested, i.e.
+# "foo" in circleci.com/gh/foo/bar/123. Available by default in
+# Circle CI build.
+#
+# CIRCLE_PROJECT_REPONAME
+# The repository name of the project being tested, i.e. "bar" in
+# circleci.com/gh/foo/bar/123. Available by default in Circle CI
+# build.
+#
+# CIRCLE_BRANCH
+# The name of the branch being tested, e.g. 'master'. Available by
+# default in Circle CI build.
+#
+# CIRCLE_SHA1
+# The SHA1 of the commit being tested. Available by default in
+# Circle CI build.
+
+
+# VARIABLES
+#
+# Note: Run make with the '-e' flag to ensure environment variables
+# take precedence over these definitions.
+
+CIRCLEFILE_BUILD_DIR := build
+CIRCLEFILE_PROJECT_SUBFOLDER := $(CIRCLE_PROJECT_REPONAME)
+
+CIRCLEFILE_DEPLOY_HOST := sandbox.instrument.com
+CIRCLEFILE_DEPLOY_URL := http://$(CIRCLEFILE_DEPLOY_HOST)/$(CIRCLEFILE_PROJECT_SUBFOLDER)/$(CIRCLE_BRANCH)
+
+CIRCLEFILE_RSYNC_SSH_USER := instrument
+CIRCLEFILE_RSYNC_SSH_HOST := $(CIRCLEFILE_RSYNC_SSH_USER)@$(CIRCLEFILE_DEPLOY_HOST)
+CIRCLEFILE_RSYNC_ROOT_DIR := /opt/hosted/$(CIRCLEFILE_PROJECT_SUBFOLDER)
+CIRCLEFILE_RSYNC_DEST_DIR := $(CIRCLEFILE_RSYNC_ROOT_DIR)/$(CIRCLE_BRANCH)
+
+GITHUB_STATUS_API_URL := https://api.github.com/repos/$(CIRCLE_PROJECT_USERNAME)/$(CIRCLE_PROJECT_REPONAME)/statuses/$(CIRCLE_SHA1)?access_token=$(CIRCLEFILE_GITHUB_ACCESS_TOKEN)
+GITHUB_STATUS_DESCRIPTION := A build has been deployed to sandbox. Check it!
+GITHUB_STATUS_STATE := success
+GITHUB_STATUS_CONTEXT := sandbox/deploy
+GITHUB_LIST_BRANCHES_API_URL := https://api.github.com/repos/$(CIRCLE_PROJECT_USERNAME)/$(CIRCLE_PROJECT_REPONAME)/branches?access_token=$(CIRCLEFILE_GITHUB_ACCESS_TOKEN)
+
+TEMPDIR := $(shell mktemp -d /tmp/tmp.XXXXXXXXXX)
+
+
+# TARGETS
+
+# rsync the build to the appropriate destination on the remote host
+rsync:
+	@echo 'Rsyncing the build to $(CIRCLEFILE_DEPLOY_HOST)...'
+	@# Ensure a destination directory exists
+	@ssh $(CIRCLEFILE_RSYNC_SSH_HOST) 'mkdir -p $(CIRCLEFILE_RSYNC_DEST_DIR)'
+	@#
+	@# Do the rsync
+	@rsync --delete -av -e 'ssh' $(CIRCLEFILE_BUILD_DIR)/ $(CIRCLEFILE_RSYNC_SSH_HOST):$(CIRCLEFILE_RSYNC_DEST_DIR)
+	@#
+	@# Add a .gitbranch file to the root, which we look for later to identify deleted branches that need
+	@# to be pruned
+	@ssh $(CIRCLEFILE_RSYNC_SSH_HOST) 'echo $(CIRCLE_BRANCH) > $(CIRCLEFILE_RSYNC_DEST_DIR)/.gitbranch'
+
+# POST a message (default success) to Github, which will show on the pull request
+update_github_status: $(TEMPDIR)/status.json
+	@echo "Updating the status on Github to $(GITHUB_STATUS_STATE)"
+	@curl -X POST --data @$< $(GITHUB_STATUS_API_URL)
+
+# Clean all branches from remote that are not in the Github repo (i.e. because they have been deleted).
+# This ensure the remote host doesn't fill up with dead branches
+clean_remote: $(TEMPDIR)/branches_to_prune.txt
+	@echo "Clean all deleted branches from $(CIRCLEFILE_RSYNC_ROOT_DIR) on $(CIRCLEFILE_DEPLOY_HOST)"
+	@# Walking through each branch that needs to be pruned, we verify that .gitbranch exists in it
+	@# then delete
+	@cat $^ | xargs -I{} ssh $(CIRCLEFILE_RSYNC_SSH_HOST) 'test -e $(CIRCLEFILE_RSYNC_ROOT_DIR)/{}/.gitbranch && rm -rf $(CIRCLEFILE_RSYNC_ROOT_DIR)/{}'
+
+# Build the list of branches to prune, by comparing the branches that are on the remote host with the
+# branches that still exist on Github
+$(TEMPDIR)/branches_to_prune.txt: $(TEMPDIR)/branches_in_git.txt $(TEMPDIR)/branches_on_host.txt
+	@comm -13 $^ > $@
+
+# Build the list of branches on the remote host
+$(TEMPDIR)/branches_on_host.txt:
+	@# Recursively search from the project root. Folders with .gitbranch in them indicate a branch
+	@ssh $(CIRCLEFILE_RSYNC_SSH_HOST) 'cd $(CIRCLEFILE_RSYNC_ROOT_DIR) && find . -name '.gitbranch' -type f | cut -c 3-' | sed "s/\/\.gitbranch$$//" | sort > $@
+
+# Parse the JSON file of git branches into a single column, sorted file
+$(TEMPDIR)/branches_in_git.txt: $(TEMPDIR)/branches.json
+	@cat $< | python -c 'import sys, json; [sys.stdout.write(b["name"]+"\n") for b in json.load(sys.stdin)]' | sort > $@
+
+# Build a JSON file of all branches in the Github repo (via the Github API)
+$(TEMPDIR)/branches.json:
+	@curl -s $(GITHUB_LIST_BRANCHES_API_URL) > $@
+
+# Build the JSON file that gets POSTed to the Github Status API update
+$(TEMPDIR)/status.json:
+	@echo '{' >> $@
+	@echo '  "state": "$(GITHUB_STATUS_STATE)", ' >> $@
+	@echo '  "target_url": "$(CIRCLEFILE_DEPLOY_URL)", ' >> $@
+	@echo '  "description": "$(GITHUB_STATUS_DESCRIPTION)", ' >> $@
+	@echo '  "context": "$(GITHUB_STATUS_CONTEXT)" ' >> $@
+	@echo '}' >> $@
+
+# Rsync the files, update the github status, then run clean up on remote
+deploy: rsync update_github_status clean_remote
+
+
+# SPECIAL TARGETS
+
+# Ensures these targets will execute even if there happens to be a file
+# of the same name as the target in the directory
+.PHONY : rsync update_github_status
+
+# Targets here are explicitly treated as intermediary, meaning they are deleted (rm)
+# automatically when the make task is complete
+.INTERMEDIATE: $(TEMPDIR)/status.json $(TEMPDIR)/branches.json $(TEMPDIR)/branches_in_git.txt $(TEMPDIR)/branches_on_host.txt $(TEMPDIR)/branches_to_prune.txt
+
