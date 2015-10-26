@@ -1,10 +1,10 @@
-var webpack = require('webpack');
-var Clean = require('clean-webpack-plugin');
+var autoprefixer = require('autoprefixer');
 
 module.exports = {
   entry: {
-    all: './source/javascripts/index.js',
-    vendor: ['babel/polyfill']
+    index: './source/javascripts/index.js',
+    application: './source/stylesheets/application.scss',
+    vendor: ['babel/polyfill'],
   },
 
   resolve: {
@@ -17,17 +17,13 @@ module.exports = {
   },
 
   module: {
-    loaders: [
-      {
-        test: /source\/javascripts\/.*\.js$/,
-        exclude: /node_modules|\.tmp|vendor/,
-        loaders: ['babel'],
-      }
-    ]
+    loaders: [{
+      test: /source\/javascripts\/.*\.js$/,
+      exclude: /node_modules|\.tmp|vendor/,
+      loaders: ['babel'],
+    }, {
+      test: /\.scss/,
+      loader: Ext
+    }]
   },
-
-  plugins: [
-    new webpack.optimize.CommonsChunkPlugin(/* chunkName= */'vendor', /* filename= */'javascripts/vendor.js', Infinity),
-    new Clean(['.tmp']),
-  ],
 };
