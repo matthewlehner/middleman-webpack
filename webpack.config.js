@@ -2,9 +2,11 @@ var autoprefixer = require('autoprefixer');
 
 module.exports = {
   entry: {
-    index: './source/javascripts/index.js',
-    application: './source/stylesheets/application.scss',
-    vendor: ['babel/polyfill'],
+    index: [
+      './source/stylesheets/application.scss',
+      './source/javascripts/index.js'
+    ],
+    vendor: ['babel/polyfill']
   },
 
   resolve: {
@@ -22,8 +24,8 @@ module.exports = {
       exclude: /node_modules|\.tmp|vendor/,
       loaders: ['babel'],
     }, {
-      test: /\.scss/,
-      loader: Ext
+      test: /.*\.scss$/,
+      loaders: ['style', 'css', 'sass']
     }]
   },
 };
