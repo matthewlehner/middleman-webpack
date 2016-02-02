@@ -4,6 +4,8 @@
   "description": "",
   "main": "./source/javascripts/all.js",
   "scripts": {
+    "start": "$(npm root)/.bin/webpack --watch -d --progress --color",
+    "build": "$(npm root)/.bin/webpack --bail -p",
     "test": "./bin/lint"
   },
   "repository": {
@@ -29,9 +31,9 @@
     "exports-loader": "^0.6.2",
     "extract-text-webpack-plugin": "^0.8.2",
     "imports-loader": "^0.6.4",
-    "node-sass": "^3.3.3",
-    "sass-loader": "^3.0.0",
+    "node-sass": "^3.4.2",
+    "sass-loader": "^3.1.2",
     "style-loader": "^0.12.4",
-    "webpack": "^1.10.5"
+    "webpack": "^1.12.12"
   }
 }

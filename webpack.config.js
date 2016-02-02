@@ -1,4 +1,4 @@
-var autoprefixer = require('autoprefixer');
+var ExtractTextPlugin = require("extract-text-webpack-plugin");
 
 module.exports = {
   entry: {
@@ -25,7 +25,15 @@ module.exports = {
       loaders: ['babel'],
     }, {
       test: /.*\.scss$/,
-      loaders: ['style', 'css', 'sass']
+      // loaders: ['style', 'css', 'sass']
+      loader: ExtractTextPlugin.extract(
+        "style",
+        "css!sass?sourceMap&includePaths[]=" + __dirname + "/node_modules"
+      )
     }]
   },
+
+  plugins: [
+    new ExtractTextPlugin("stylesheets/app.css")
+  ]
 };
